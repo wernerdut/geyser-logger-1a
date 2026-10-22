@@ -1,7 +1,7 @@
 name: snapshot
 on:
   schedule:
-    - cron: "7,37 * * * *"   # every 30 minutes (UTC); GitHub may delay or skip runs when busy
+    - cron: "7,37 * * * *"   #  every 30 minutes (UTC); GitHub may delay or skip runs when busy
   workflow_dispatch: {}
   push:
     branches: [main]
