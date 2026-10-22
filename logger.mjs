@@ -195,7 +195,7 @@ async function sunsynkDay(date) {
 // ---------- modes ----------
 async function snapshot() {
   const now = new Date();
-  const row = { ts: now.toISOString(), local: `${localDate(now)} ${localTime(now)}` };
+  const row = { ts: now.toISOString(), local: `${localDate(now)} ${localTime(now)}`, src: env.GITHUB_EVENT_NAME || "local" };
   const errors = [];
   const [g, s] = await Promise.allSettled([readGeyser(), readSunsynk()]);
   if (g.status === "fulfilled") Object.assign(row, g.value); else errors.push(`geyser: ${g.reason?.message || g.reason}`);
