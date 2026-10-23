@@ -1,0 +1,1 @@
+{"ts":"2026-10-23T22:00:11.881Z","local":"2026-10-24 00:00:11","src":"workflow_dispatch","tank_c":36,"collector_c":15,"pump":"Off","element":"Off","power":false,"mode":"Timer","fault":0,"blocks":[60,60,65,60],"solar_diff_c":7,"pv_w":0,"pv_today_kwh":0,"load_w":389,"grid_w":471,"batt_soc":25,"batt_w":7}
