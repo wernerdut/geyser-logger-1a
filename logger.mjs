@@ -86,11 +86,14 @@ async function tuyaToken() {
 }
 
 async function tuya(method, p, query) {
-  const token = await tuyaToken();
+  let token = await tuyaToken();
   for (let attempt = 0; attempt < 4; attempt++) {
     const r = await tuyaRequest(method, p, token, query);
     if (r?.success) return r.result;
     if (Number(r?.code) === 40000309) { await sleep(3000 * (attempt + 1)); continue; } // rate limited
+    if ([1010, 1011, 1012].includes(Number(r?.code))) { // token replaced by a parallel run: get a fresh one
+      tuyaTokenCache = null; await sleep(2000); token = await tuyaToken(); continue;
+    }
     throw new Error(`Tuya ${p}: ${r?.msg || "failed"} (code ${r?.code ?? "?"})`);
   }
   throw new Error(`Tuya ${p}: still rate limited after retries`);
