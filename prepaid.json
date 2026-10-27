@@ -1,0 +1,29 @@
+{
+  "_about": "Prepaid electricity ledger for meter 07147738442 (1A Welgemeend, includes Ansie's dwelling). Add every token (date, rand, kwh from the SMS/app) and any meter reading. The latest reading is the anchor; balance = reading + tokens bought after it - grid import since (inverter lifetime counter). Readings need the inverter's import total at that moment: tell Claude the reading and it fills that in.",
+  "meter": "07147738442",
+  "tariff": {
+    "block1_kwh": 600,
+    "block1_r_per_kwh": 3.5595,
+    "block2_r_per_kwh": 4.6906,
+    "_note": "Incl VAT. Matches the tokens: first R2,500 in a month = 600 + 77.7 kWh, a second one = 533 kWh (all block 2)."
+  },
+  "alerts": {
+    "low_days": 3,
+    "buffer_days": 2
+  },
+  "tokens": [
+    { "date": "2026-08-08", "rand": 2500, "kwh": 677.7 },
+    { "date": "2026-08-28", "rand": 2500, "kwh": 533.0 },
+    { "date": "2026-09-17", "rand": 2500, "kwh": 677.7 },
+    { "date": "2026-10-07", "rand": 2500, "kwh": 677.7 }
+  ],
+  "readings": [
+    {
+      "local": "2026-10-27 22:44:28",
+      "units": 45,
+      "import_total_kwh": 25594.8,
+      "estimated": true,
+      "_note": "Estimate: 677.7 (07 Oct) - 634.3 imported since + small leftover; Werner last saw ~55. Replace with a real reading."
+    }
+  ]
+}

@@ -9,6 +9,8 @@ on:
       - logger.mjs
       - control.mjs
       - schedule.json
+      - prepaid.mjs
+      - prepaid.json
       - .github/workflows/**
 permissions:
   contents: write
@@ -32,6 +34,8 @@ jobs:
           TUYA_DEVICE_ID: bf7df64982f062d651ntsi
           SUNSYNK_INVERTER_SN: "2211304411"
           GITHUB_TOKEN: ${{ github.token }}
+          TANNIE_NOTIFY_URL: ${{ secrets.TANNIE_NOTIFY_URL }}
+          TANNIE_NOTIFY_TOKEN: ${{ secrets.TANNIE_NOTIFY_TOKEN }}
         run: node logger.mjs snapshot
       - name: Commit
         if: always()

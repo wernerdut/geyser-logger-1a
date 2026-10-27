@@ -23,3 +23,22 @@ How the Geyserwise works: the element heats when (a display timer window is open
 - **Alerts** open an issue here (GitHub emails the owner): solar pump not moving water, or geyser unreachable for several runs.
 
 Each sample row records the decision under `control` (reasons, desired state, writes, read-back).
+
+## Prepaid electricity
+
+`prepaid.json` is the ledger for meter 07147738442: every token (date, rand, kWh) and meter readings. The latest reading is the
+anchor; balance = reading + tokens bought after it - grid import since then (the inverter's lifetime import counter, which
+tracks the meter to within a few percent; the whole property, including Ansie's dwelling, is behind the inverter).
+
+Each snapshot logs `prepaid: {balance_kwh, rate_kwh_day, days_left}` (rate = average of the last 7 complete days) and raises
+`[power]` issues, closed automatically once the condition clears:
+
+- **Buy this month's block-1 electricity**: nothing (or under 550 kWh) bought yet this calendar month and the meter won't last
+  to the 1st plus 3 days. Fires as early as the 1st, because buying early costs nothing and a second token later in the month
+  is all block 2.
+- **Low, lasts to the 1st**: block 1 already bought this month, under 3 days left, but it reaches the 1st. Hold.
+- **Low, buy a bridge**: same, but it runs out first. Suggests the smallest top-up (to the 1st plus 2 days) at block-2 rates.
+- **Under a day left**: buy anything.
+- **Tracker missing a token**: computed balance well below zero while the power is on.
+
+Alerts are also sent to Tannie (WhatsApp) once `TANNIE_NOTIFY_URL` and `TANNIE_NOTIFY_TOKEN` secrets exist.

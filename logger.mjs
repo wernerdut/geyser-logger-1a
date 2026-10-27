@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
+import { balanceOf, dailyRate, prepaidAlerts } from "./prepaid.mjs";
 
 const env = process.env;
 const TZ = "Africa/Johannesburg";
@@ -181,15 +182,30 @@ async function readSunsynk() {
   ]);
   return {
     pv_w: num(input.pac), pv_today_kwh: num(input.etoday),
-    load_w: num(load.totalPower), grid_w: num(grid.pac),
+    load_w: num(load.totalPower), grid_w: num(grid.pac), grid_import_total_kwh: num(grid.etotalFrom),
     batt_soc: num(battery.soc), batt_w: num(battery.power),
   };
 }
 
-async function sunsynkDay(date) {
+let plantIdCache = null;
+async function plantId() {
+  if (plantIdCache) return plantIdCache;
   const plants = await ss("api/v1/plants?page=1&limit=20&name=&status=");
-  const id = plants?.infos?.[0]?.id;
-  if (!id) throw new Error("Sunsynk: no plant found");
+  plantIdCache = plants?.infos?.[0]?.id;
+  if (!plantIdCache) throw new Error("Sunsynk: no plant found");
+  return plantIdCache;
+}
+
+// Daily grid import (kWh) for a month, [{date, kwh}].
+async function sunsynkMonthImport(ym) {
+  const id = await plantId();
+  const d = await ss(`api/v1/plant/energy/${id}/month?lan=en&date=${ym}&id=${id}`);
+  const s = (d?.infos ?? []).find((x) => x.label === "Purchased electricity");
+  return (s?.records ?? []).map((r) => ({ date: r.time, kwh: num(r.value) }));
+}
+
+async function sunsynkDay(date) {
+  const id = await plantId();
   const d = await ss(`api/v1/plant/energy/${id}/day?lan=en&date=${date}&id=${id}`);
   const series = {};
   for (const s of d?.infos ?? []) {
@@ -210,7 +226,11 @@ async function snapshot() {
   if (g.status === "fulfilled") {
     try { row.control = await control(now, row); } catch (e) { row.control = { error: String(e?.message || e) }; }
   }
-  try { await alerts(now, row); } catch (e) { console.error("alerts failed:", e?.message || e); }
+  let power = null;
+  if (row.grid_import_total_kwh != null) {
+    try { power = await prepaid(now, row); } catch (e) { row.prepaid = { error: String(e?.message || e) }; }
+  }
+  try { await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
   console.log(
     `${row.local} tank=${row.tank_c ?? "-"} coll=${row.collector_c ?? "-"} pump=${row.pump ?? "-"} elem=${row.element ?? "-"} ` +
@@ -218,6 +238,7 @@ async function snapshot() {
     (errors.length ? ` ERRORS: ${errors.join(" | ")}` : "")
   );
   if (row.control) console.log(`control: ${JSON.stringify(row.control)}`);
+  if (row.prepaid) console.log(`prepaid: ${JSON.stringify(row.prepaid)}`);
   if (errors.length === 2) process.exitCode = 1;
 }
 
@@ -259,28 +280,82 @@ async function control(now, row) {
   return out;
 }
 
-// ---------- alerts: GitHub issues on this repo (GitHub emails the owner) ----------
-async function alerts(now, row) {
+// ---------- prepaid electricity ----------
+async function prepaid(now, row) {
+  const ledger = JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "prepaid.json"), "utf8"));
+  const bal = balanceOf(ledger, row.grid_import_total_kwh);
+  if (!bal) return null;
+  const today = localDate(now);
+  const ym = today.slice(0, 7);
+  let daily = await sunsynkMonthImport(ym);
+  if (daily.filter((d) => d.date < today).length < 7) {
+    const [y, m] = ym.split("-").map(Number);
+    const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+    daily = [...(await sunsynkMonthImport(prev)), ...daily];
+  }
+  const rate = dailyRate(daily, today, 7);
+  const local = `${today} ${localTime(now)}`;
+  row.prepaid = {
+    balance_kwh: bal.balance, rate_kwh_day: rate, days_left: rate ? Math.round((bal.balance / rate) * 10) / 10 : null,
+    estimated: bal.estimated,
+  };
+  return prepaidAlerts({ local, balance: bal.balance, rate, ledger, estimated: bal.estimated });
+}
+
+// ---------- alerts: GitHub issues on this repo (GitHub emails the owner), mirrored to Tannie when configured ----------
+// `power` is the list of prepaid alerts, or null when the prepaid check didn't run (then open [power] issues are left alone).
+async function alerts(now, row, power) {
   const schedule = await loadSchedule();
   let recentRows = [];
   try {
     const txt = await fs.readFile(path.join(DATA_DIR, `samples/${localDate(now)}.jsonl`), "utf8");
     recentRows = txt.trim().split("\n").filter(Boolean).slice(-10).map((l) => JSON.parse(l));
   } catch { /* first row of the day */ }
-  const found = checkAlerts({ row, recentRows, schedule });
-  if (!found.length) return;
-  row.alerts = found.map((a) => a.key);
+  const found = [...checkAlerts({ row, recentRows, schedule }), ...(power ?? [])];
+  if (found.length) row.alerts = found.map((a) => a.key);
   const token = env.GITHUB_TOKEN, repo = env.GITHUB_REPOSITORY;
-  if (!token || !repo) { console.log("alerts (not posted, no GitHub token):", found.map((a) => a.title).join(" | ")); return; }
+  if (!token || !repo) {
+    if (found.length) console.log("alerts (not posted, no GitHub token):", found.map((a) => a.title).join(" | "));
+    return;
+  }
   const h = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
   const open = (await fetchJson(`https://api.github.com/repos/${repo}/issues?state=open&per_page=100`, { headers: h })).json;
+  const openList = Array.isArray(open) ? open.filter((i) => !i.pull_request) : [];
   for (const a of found) {
-    if (Array.isArray(open) && open.some((i) => i.title === a.title)) continue; // already open: don't spam
+    if (openList.some((i) => i.title === a.title)) continue; // already open: don't spam
     const r = await fetchJson(`https://api.github.com/repos/${repo}/issues`, {
       method: "POST", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ title: a.title, body: a.body }),
     });
     console.log(`alert ${a.key}: issue ${r.json?.number ?? r.status}`);
+    await notifyTannie(`${a.title.replace(/^\[[^\]]+\]\s*/, "")}\n\n${a.body}`);
   }
+  // Close [power] issues whose condition has cleared (a token was recorded, or the month rolled over).
+  if (power) {
+    const live = new Set(found.map((a) => a.title));
+    for (const i of openList.filter((i) => i.title.startsWith("[power]") && !live.has(i.title))) {
+      await fetchJson(`https://api.github.com/repos/${repo}/issues/${i.number}/comments`, {
+        method: "POST", headers: { ...h, "Content-Type": "application/json" },
+        body: JSON.stringify({ body: `Cleared at ${row.local}: ${JSON.stringify(row.prepaid)}` }),
+      });
+      await fetchJson(`https://api.github.com/repos/${repo}/issues/${i.number}`, {
+        method: "PATCH", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ state: "closed" }),
+      });
+      console.log(`closed cleared alert #${i.number}`);
+    }
+  }
+}
+
+// Optional WhatsApp via Tannie. No-op until TANNIE_NOTIFY_URL and TANNIE_NOTIFY_TOKEN secrets exist.
+async function notifyTannie(text) {
+  const url = (env.TANNIE_NOTIFY_URL || "").trim(), tok = (env.TANNIE_NOTIFY_TOKEN || "").trim();
+  if (!url || !tok) return;
+  try {
+    const r = await fetchJson(url, {
+      method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text, source: "geyser-logger-1a" }),
+    });
+    console.log(`tannie notify: ${r.status}`);
+  } catch (e) { console.error("tannie notify failed:", e?.message || e); }
 }
 
 async function archive() {
