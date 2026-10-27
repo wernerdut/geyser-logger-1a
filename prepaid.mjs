@@ -1,6 +1,6 @@
 // Prepaid electricity tracker: balance from the inverter's lifetime grid-import counter, plus buy alerts that know about
 // Cape Town's monthly blocks (the first 600 kWh bought each calendar month is block 1, the rest block 2).
-// Pure logic only; logger.mjs supplies the readings and posts the alerts.
+// Pure logic only; logger.mjs supplies the readings and posts the alerts (GitHub issue + WhatsApp via Tannie /notify).
 
 const r2 = (x) => Math.round(x * 100) / 100;
 const ymd = (s) => String(s).slice(0, 10);
