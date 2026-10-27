@@ -327,7 +327,8 @@ async function alerts(now, row, power) {
       method: "POST", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ title: a.title, body: a.body }),
     });
     console.log(`alert ${a.key}: issue ${r.json?.number ?? r.status}`);
-    await notifyTannie(`${a.title.replace(/^\[[^\]]+\]\s*/, "")}\n\n${a.body}`);
+    const link = r.json?.html_url ? `\n\n${r.json.html_url}` : "";
+    await notifyTannie(`*${a.title.replace(/^\[[^\]]+\]\s*/, "")}*\n\n${a.body}${link}`);
   }
   // Close [power] issues whose condition has cleared (a token was recorded, or the month rolled over).
   if (power) {
