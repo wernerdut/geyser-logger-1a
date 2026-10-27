@@ -9,6 +9,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
 
 const env = process.env;
 const TZ = "Africa/Johannesburg";
@@ -61,18 +62,20 @@ const TUYA_DEVICE = (env.TUYA_DEVICE_ID || "").trim();
 const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 const tuyaSign = (s) => crypto.createHmac("sha256", TUYA_SECRET).update(s, "utf8").digest("hex").toUpperCase();
 
-async function tuyaRequest(method, p, token, query) {
+async function tuyaRequest(method, p, token, query, body) {
   const keys = Object.keys(query || {}).filter((k) => query[k] !== undefined && query[k] !== null).sort();
   const url = keys.length ? `${p}?${keys.map((k) => `${k}=${query[k]}`).join("&")}` : p;
+  const bodyStr = body === undefined ? "" : JSON.stringify(body);
   const t = String(Date.now());
   const nonce = crypto.randomUUID();
-  const sts = [method, sha256(""), "", url].join("\n");
+  const sts = [method, sha256(bodyStr), "", url].join("\n");
   const headers = {
     client_id: TUYA_ID, t, nonce, sign_method: "HMAC-SHA256",
     sign: tuyaSign(TUYA_ID + (token || "") + t + nonce + sts),
+    "Content-Type": "application/json",
   };
   if (token) headers.access_token = token;
-  return (await fetchJson(TUYA_BASE + url, { method, headers })).json;
+  return (await fetchJson(TUYA_BASE + url, { method, headers, body: bodyStr || undefined })).json;
 }
 
 let tuyaTokenCache = null;
@@ -85,10 +88,10 @@ async function tuyaToken() {
   return tuyaTokenCache;
 }
 
-async function tuya(method, p, query) {
+async function tuya(method, p, query, body) {
   let token = await tuyaToken();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const r = await tuyaRequest(method, p, token, query);
+    const r = await tuyaRequest(method, p, token, query, body);
     if (r?.success) return r.result;
     if (Number(r?.code) === 40000309) { await sleep(3000 * (attempt + 1)); continue; } // rate limited
     if ([1010, 1011, 1012].includes(Number(r?.code))) { // token replaced by a parallel run: get a fresh one
@@ -204,13 +207,80 @@ async function snapshot() {
   if (g.status === "fulfilled") Object.assign(row, g.value); else errors.push(`geyser: ${g.reason?.message || g.reason}`);
   if (s.status === "fulfilled") Object.assign(row, s.value); else errors.push(`sunsynk: ${s.reason?.message || s.reason}`);
   if (errors.length) row.errors = errors;
+  if (g.status === "fulfilled") {
+    try { row.control = await control(now, row); } catch (e) { row.control = { error: String(e?.message || e) }; }
+  }
+  try { await alerts(now, row); } catch (e) { console.error("alerts failed:", e?.message || e); }
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
   console.log(
     `${row.local} tank=${row.tank_c ?? "-"} coll=${row.collector_c ?? "-"} pump=${row.pump ?? "-"} elem=${row.element ?? "-"} ` +
     `pv=${row.pv_w ?? "-"} load=${row.load_w ?? "-"} grid=${row.grid_w ?? "-"} soc=${row.batt_soc ?? "-"}` +
     (errors.length ? ` ERRORS: ${errors.join(" | ")}` : "")
   );
+  if (row.control) console.log(`control: ${JSON.stringify(row.control)}`);
   if (errors.length === 2) process.exitCode = 1;
+}
+
+// ---------- control (switch + Block1-4 only) ----------
+async function loadSchedule() {
+  return JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "schedule.json"), "utf8"));
+}
+
+async function writeProp(code, value) {
+  if (!ALLOWED_CODES.has(code)) throw new Error(`refusing to write ${code}`);
+  if (code === "switch" ? typeof value !== "boolean" : !(Number.isInteger(value) && value >= 30 && value <= 65)) {
+    throw new Error(`refusing out-of-range ${code}=${value}`);
+  }
+  await tuya("POST", `/v2.0/cloud/thing/${TUYA_DEVICE}/shadow/properties/issue`, null, { properties: JSON.stringify({ [code]: value }) });
+}
+
+async function control(now, row) {
+  const schedule = await loadSchedule();
+  const minute = Number(localTime(now).slice(0, 2)) * 60 + Number(localTime(now).slice(3, 5));
+  const current = { switchOn: row.power, blocks: row.blocks };
+  const { desired, reasons } = decide({ minute, schedule, tank: row.tank_c, soc: row.batt_soc ?? null, switchOn: row.power, blocks: row.blocks });
+  const writes = diff(desired, current);
+  const out = { reasons, desired, writes: [] };
+  if (!schedule.control_enabled || env.CONTROL_DRY_RUN === "1") {
+    out.dry_run = true; out.writes = writes; return out;
+  }
+  for (const w of writes) {
+    try { await writeProp(w.code, w.value); out.writes.push({ ...w, ok: true }); }
+    catch (e) { out.writes.push({ ...w, ok: false, error: String(e?.message || e) }); }
+    await sleep(2500); // the Geyserwise can drop settings sent back-to-back
+  }
+  if (out.writes.length) {
+    try {
+      const after = await readGeyser();
+      out.after = { switch: after.power, blocks: after.blocks };
+      out.confirmed = after.power === desired.switch && after.blocks.every((v, i) => v === desired.blocks[i]);
+    } catch (e) { out.after_error = String(e?.message || e); }
+  }
+  return out;
+}
+
+// ---------- alerts: GitHub issues on this repo (GitHub emails the owner) ----------
+async function alerts(now, row) {
+  const schedule = await loadSchedule();
+  let recentRows = [];
+  try {
+    const txt = await fs.readFile(path.join(DATA_DIR, `samples/${localDate(now)}.jsonl`), "utf8");
+    recentRows = txt.trim().split("\n").filter(Boolean).slice(-10).map((l) => JSON.parse(l));
+  } catch { /* first row of the day */ }
+  const found = checkAlerts({ row, recentRows, schedule });
+  if (!found.length) return;
+  row.alerts = found.map((a) => a.key);
+  const token = env.GITHUB_TOKEN, repo = env.GITHUB_REPOSITORY;
+  if (!token || !repo) { console.log("alerts (not posted, no GitHub token):", found.map((a) => a.title).join(" | ")); return; }
+  const h = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
+  const open = (await fetchJson(`https://api.github.com/repos/${repo}/issues?state=open&per_page=100`, { headers: h })).json;
+  for (const a of found) {
+    if (Array.isArray(open) && open.some((i) => i.title === a.title)) continue; // already open: don't spam
+    const r = await fetchJson(`https://api.github.com/repos/${repo}/issues`, {
+      method: "POST", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ title: a.title, body: a.body }),
+    });
+    console.log(`alert ${a.key}: issue ${r.json?.number ?? r.status}`);
+  }
 }
 
 async function archive() {

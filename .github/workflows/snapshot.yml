@@ -7,9 +7,12 @@ on:
     branches: [main]
     paths:
       - logger.mjs
+      - control.mjs
+      - schedule.json
       - .github/workflows/**
 permissions:
   contents: write
+  issues: write
 concurrency:
   group: data-commit
   cancel-in-progress: false
@@ -28,6 +31,7 @@ jobs:
           TUYA_REGION: eu
           TUYA_DEVICE_ID: bf7df64982f062d651ntsi
           SUNSYNK_INVERTER_SN: "2211304411"
+          GITHUB_TOKEN: ${{ github.token }}
         run: node logger.mjs snapshot
       - name: Commit
         if: always()

@@ -1,0 +1,37 @@
+{
+  "_about": "Geyser control schedule for 1A Welgemeend. Edited by Werner (or Claude on Werner's say-so). The logger enforces it every 30 minutes and may only set the geyser's switch and Block1-4.",
+  "control_enabled": true,
+  "hot_by": [
+    {
+      "name": "morning showers",
+      "time": "06:30",
+      "target_c": 60,
+      "earliest": "04:00"
+    },
+    {
+      "name": "evening showers",
+      "time": "19:00",
+      "target_c": 60,
+      "earliest": "16:30"
+    }
+  ],
+  "diverter": {
+    "enabled": true,
+    "window": [
+      "10:00",
+      "16:30"
+    ],
+    "battery_on_pct": 98,
+    "battery_off_pct": 94,
+    "target_c": 65
+  },
+  "idle_block_c": 30,
+  "tank_kwh_per_c": 0.29,
+  "element_kw": 3.4,
+  "margin_min": 15,
+  "cadence_min": 30,
+  "alerts": {
+    "pump_gap_c": 40,
+    "geyser_unreachable_runs": 4
+  }
+}
