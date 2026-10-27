@@ -41,4 +41,4 @@ Each snapshot logs `prepaid: {balance_kwh, rate_kwh_day, days_left}` (rate = ave
 - **Under a day left**: buy anything.
 - **Tracker missing a token**: computed balance well below zero while the power is on.
 
-Alerts are also sent to Tannie (WhatsApp) once `TANNIE_NOTIFY_URL` and `TANNIE_NOTIFY_TOKEN` secrets exist.
+Alerts are also sent to Werner on WhatsApp via Tannie (`POST /notify`) once the `TANNIE_NOTIFY_TOKEN` secret exists (same value as `NOTIFY_TOKEN` on the Railway tannie service).
