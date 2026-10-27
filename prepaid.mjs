@@ -54,7 +54,7 @@ export function prepaidAlerts({ local, balance, rate, ledger, estimated = false 
   const block1Left = Math.max(0, b1 - boughtKwh);
   const daysLeft = balance / rate;
   const runsOut = (days) => (days < 1 ? `in about ${Math.max(0, Math.round(days * 24))} hours` : `in about ${days.toFixed(1)} days`);
-  const status = `Meter ~${Math.max(0, Math.round(balance))} kWh${estimated ? " (estimated)" : ""}, using ~${rate} kWh/day, runs out ${runsOut(daysLeft)}.`;
+  const status = `Meter ~${Math.max(0, Math.round(balance))} kWh${estimated ? " (estimated)" : ""}, using ~${Math.round(rate)} kWh/day, runs out ${runsOut(daysLeft)}.`;
 
   if (balance < -15) {
     out.push({
