@@ -1,5 +1,5 @@
 {
-  "_about": "Prepaid electricity ledger for meter 07147738442 (1A Welgemeend, includes Ansie's dwelling). Add every token (date, rand, kwh from the SMS/app) and any meter reading. The latest reading is the anchor; balance = reading + tokens bought after it - grid import since (inverter lifetime counter). Readings need the inverter's import total at that moment: tell Claude the reading and it fills that in.",
+  "_about": "Prepaid electricity ledger for meter 07147738442 (1A Welgemeend, includes Ansie's dwelling). Add every token (date, rand, kwh from the SMS/app) and any meter reading. The latest reading is the anchor; balance = reading + tokens bought after it - grid import since (inverter lifetime counter). Readings need the inverter's import total at that moment: tell Claude the reading and it fills that in. Alerts go to GitHub issues and to Werner's WhatsApp via Tannie.",
   "meter": "07147738442",
   "tariff": {
     "block1_kwh": 600,
@@ -12,10 +12,26 @@
     "buffer_days": 2
   },
   "tokens": [
-    { "date": "2026-08-08", "rand": 2500, "kwh": 677.7 },
-    { "date": "2026-08-28", "rand": 2500, "kwh": 533.0 },
-    { "date": "2026-09-17", "rand": 2500, "kwh": 677.7 },
-    { "date": "2026-10-07", "rand": 2500, "kwh": 677.7 }
+    {
+      "date": "2026-08-08",
+      "rand": 2500,
+      "kwh": 677.7
+    },
+    {
+      "date": "2026-08-28",
+      "rand": 2500,
+      "kwh": 533.0
+    },
+    {
+      "date": "2026-09-17",
+      "rand": 2500,
+      "kwh": 677.7
+    },
+    {
+      "date": "2026-10-07",
+      "rand": 2500,
+      "kwh": 677.7
+    }
   ],
   "readings": [
     {
