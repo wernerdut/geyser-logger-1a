@@ -5,13 +5,13 @@
     {
       "name": "morning showers",
       "time": "06:30",
-      "target_c": 60,
-      "earliest": "04:00"
+      "target_c": 65,
+      "earliest": "01:30"
     },
     {
       "name": "evening showers",
       "time": "19:00",
-      "target_c": 60,
+      "target_c": 65,
       "earliest": "16:30"
     }
   ],
@@ -27,11 +27,12 @@
   },
   "idle_block_c": 30,
   "tank_kwh_per_c": 0.29,
-  "element_kw": 3.4,
+  "element_kw": 1.5,
   "margin_min": 15,
   "cadence_min": 30,
   "alerts": {
     "pump_gap_c": 40,
     "geyser_unreachable_runs": 4
-  }
+  },
+  "_element_kw_note": "Effective rate, not the 3.4 kW nameplate: the sensor sits next to the element and cuts it off early, so it runs ~35-45% of the time while heating (measured 28 Oct 04:00-06:00)."
 }
