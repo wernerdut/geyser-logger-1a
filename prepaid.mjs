@@ -127,15 +127,16 @@ export function resolveReadings(ledger, rows) {
  * Grid outage: the inverter sees no grid frequency. If the meter is (nearly) empty, it's more likely the prepaid units
  * ran out than a municipal outage.
  */
-export function gridAlerts({ row, balance, batteryKwh = 11.3 }) {
+export function gridAlerts({ row, balance, batteryKwh = 11.3, shutdownPct = 20 }) {
   if (row.grid_hz == null || row.grid_hz >= 40) return [];
   const soc = row.batt_soc, load = row.load_w;
-  const stored = soc != null ? (soc / 100) * batteryKwh : null;
+  // Usable in an outage = above the inverter's battery shutdown level (batteryShutdownCap, 20% on this inverter).
+  const stored = soc != null ? (Math.max(0, soc - shutdownPct) / 100) * batteryKwh : null;
   const hours = stored != null && load > 50 ? stored / (load / 1000) : null;
   const lines = [
     `At ${row.local.slice(11, 16)} the inverter sees no grid at 1A Welgemeend (frequency ${row.grid_hz} Hz). The house is on battery.`,
-    `Battery ${soc ?? "?"}%${stored != null ? ` (~${stored.toFixed(1)} kWh)` : ""}, load ${load ?? "?"} W` +
-      (hours != null ? `: roughly ${hours.toFixed(1)} h to empty at this load, and the inverter cuts out before empty.` : "."),
+    `Battery ${soc ?? "?"}%${stored != null ? ` (~${stored.toFixed(1)} kWh usable)` : ""}, load ${load ?? "?"} W` +
+      (hours != null ? `: roughly ${hours.toFixed(1)} h of backup at this load before the inverter shuts the battery off at ${shutdownPct}%.` : "."),
   ];
   if (balance != null && balance < 5) lines.push(`The prepaid tracker puts the meter at ~${Math.max(0, Math.round(balance))} kWh, so the units have probably run out. Buy and key in a token.`);
   else lines.push("Prepaid units look fine, so this is likely a municipal outage or a tripped breaker.");
