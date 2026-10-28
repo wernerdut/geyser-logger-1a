@@ -267,7 +267,8 @@ async function control(now, row) {
   const schedule = await loadSchedule();
   const minute = Number(localTime(now).slice(0, 2)) * 60 + Number(localTime(now).slice(3, 5));
   const current = { switchOn: row.power, blocks: row.blocks };
-  const { desired, reasons } = decide({ minute, schedule, tank: row.tank_c, soc: row.batt_soc ?? null, switchOn: row.power, blocks: row.blocks });
+  const { desired, reasons } = decide({ minute, schedule, tank: row.tank_c, soc: row.batt_soc ?? null, switchOn: row.power, blocks: row.blocks,
+    collector: row.collector_c ?? null, pump: row.pump ?? null });
   const writes = diff(desired, current);
   const out = { reasons, desired, writes: [] };
   if (!schedule.control_enabled || env.CONTROL_DRY_RUN === "1") {

@@ -7,14 +7,23 @@
       "time": "06:30",
       "target_c": 65,
       "earliest": "01:30"
-    },
-    {
-      "name": "evening showers",
-      "time": "19:00",
-      "target_c": 65,
-      "earliest": "16:30"
     }
   ],
+  "keep_warm": {
+    "enabled": true,
+    "window": [
+      "06:00",
+      "22:00"
+    ],
+    "min_c": 55,
+    "target_c": 65,
+    "solar_first": [
+      "10:00",
+      "16:00"
+    ],
+    "solar_wait_min_c": 45,
+    "_note": "Irregular showers: hold the tank at 55+ all day, reheat to 65. Midday the solar collector gets first go while it is working, unless the tank drops below 45."
+  },
   "diverter": {
     "enabled": true,
     "window": [

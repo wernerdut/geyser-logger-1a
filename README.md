@@ -53,3 +53,11 @@ Alerts are also sent to Werner on WhatsApp via Tannie (`POST /notify`) once the 
 - **Capture**: Werner forwards the token SMS, a screenshot of the purchase, or "meter 52" to Tannie. Tannie commits it to
   `prepaid.json` (commit message `ledger: ...`). That push triggers a run, which WhatsApps the new balance. Readings
   arrive without an inverter import total; the logger takes it from the nearest sample (within 60 minutes).
+
+### Keep warm (irregular showers)
+
+`schedule.json` `keep_warm`: between 06:00 and 22:00 the tank never sits below 55°C; when it does, the element reheats it to
+65 (hysteresis: it stays on until the sensor reads ~63+ at the end of a run). From 10:00 to 16:00 the solar collector gets
+first go while it is working (pump on, or collector more than 5°C above the tank), unless the tank falls below 45.
+The fixed evening "hot by 19:00" was removed; the morning one stays because nights are idle. The surplus diverter
+(battery full, 10:00-16:30) still tops the tank up to 65 for free. 65 is the ceiling without a mixing valve.

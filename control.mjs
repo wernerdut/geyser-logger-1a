@@ -23,8 +23,10 @@ const quarter = (min) => Math.floor((((min % 1440) + 1440) % 1440) / 360);
  * @param {number|null} p.soc   battery %
  * @param {boolean|null} p.switchOn current geyser switch state
  * @param {Array<number|null>} p.blocks current Block1-4
+ * @param {number|null} [p.collector] solar collector °C
+ * @param {string|null} [p.pump]  solar pump "On"/"Off"
  */
-export function decide({ minute, schedule, tank, soc, switchOn, blocks }) {
+export function decide({ minute, schedule, tank, soc, switchOn, blocks, collector = null, pump = null }) {
   const S = schedule;
   const idle = S.idle_block_c ?? 30;
   const cadence = S.cadence_min ?? 30;
@@ -49,7 +51,36 @@ export function decide({ minute, schedule, tank, soc, switchOn, blocks }) {
     }
   }
 
-  // 2. Surplus diverter: battery full means solar is being thrown away, so store it as heat.
+  // 2. Keep warm: for irregular showers, never let the tank sit below min_c during the day. Once triggered it heats
+  //    until the sensor reads about the target at the end of a run (hysteresis), so it doesn't chatter at the floor.
+  //    In the solar window the collector gets first go while it is actually working (pump on or collector hotter than
+  //    the tank), unless the tank falls below solar_wait_min_c.
+  const K = S.keep_warm;
+  if (K?.enabled && tank != null) {
+    const [a, b] = K.window.map(toMin);
+    if (minute >= a && minute < b) {
+      const t = Number(K.target_c);
+      const latched = switchOn === true && blocks[quarter(minute)] >= t && tank < t - 2;
+      let wanted = latched || tank < Number(K.min_c);
+      const sw = K.solar_first;
+      const solarWorking = pump === "On" || (collector != null && collector > tank + 5);
+      if (wanted && sw && solarWorking && tank >= Number(K.solar_wait_min_c ?? 0)) {
+        const [sa, sb] = sw.map(toMin);
+        if (minute >= sa && minute < sb && !latched) {
+          wanted = false;
+          reasons.push(`keep warm: tank ${tank}°C, solar collector working, letting it heat first`);
+        }
+      }
+      if (wanted) {
+        target = Math.max(target ?? 0, t);
+        reasons.push(`keep warm: tank ${tank}°C ${latched ? "(reheating)" : `< ${K.min_c}°C`} -> ${t}°C`);
+      } else if (!reasons.some((r) => r.startsWith("keep warm"))) {
+        reasons.push(`keep warm: tank ${tank}°C ok`);
+      }
+    }
+  }
+
+  // 3. Surplus diverter: battery full means solar is being thrown away, so store it as heat.
   const D = S.diverter;
   if (D?.enabled && soc != null) {
     const [a, b] = D.window.map(toMin);
@@ -69,7 +100,7 @@ export function decide({ minute, schedule, tank, soc, switchOn, blocks }) {
     desired.blocks[quarter(minute)] = target;
     desired.blocks[quarter(minute + cadence + 5)] = target;
   }
-  if (!reasons.length) reasons.push("idle: no window open");
+  if (target == null && !reasons.length) reasons.push("idle: no window open");
   return { desired, reasons };
 }
 
