@@ -40,6 +40,11 @@
       "import_total_kwh": 25594.8,
       "estimated": true,
       "_note": "Estimate: 677.7 (07 Oct) - 634.3 imported since + small leftover; Werner last saw ~55. Replace with a real reading."
+    },
+    {
+      "local": "2026-10-28 06:12:56",
+      "units": 57.5,
+      "source": "whatsapp"
     }
   ]
 }
