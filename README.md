@@ -57,7 +57,8 @@ Alerts are also sent to Werner on WhatsApp via Tannie (`POST /notify`) once the 
 ### Keep warm (irregular showers)
 
 `schedule.json` `keep_warm`: between 06:00 and 22:00 the tank never sits below 55°C; when it does, the element reheats it to
-65 (hysteresis: it stays on until the sensor reads ~63+ at the end of a run). From 10:00 to 16:00 the solar collector gets
-first go while it is working (pump on, or collector more than 5°C above the tank), unless the tank falls below 45.
+65 (hysteresis: it stays on until the sensor reads ~63+ at the end of a run). From 08:00 to 16:00 the sun does the reheat: until 11:00 it
+always waits (the collector is still warming up), after that only while the collector is working (pump on, or more than
+5°C above the tank); a cloudy day falls back to the element. Below 40 the element heats regardless.
 The fixed evening "hot by 19:00" was removed; the morning one stays because nights are idle. The surplus diverter
 (battery full, 10:00-16:30) still tops the tank up to 65 for free. 65 is the ceiling without a mixing valve.

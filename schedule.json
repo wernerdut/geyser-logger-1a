@@ -18,11 +18,12 @@
     "min_c": 55,
     "target_c": 65,
     "solar_first": [
-      "10:00",
+      "08:00",
       "16:00"
     ],
-    "solar_wait_min_c": 45,
-    "_note": "Irregular showers: hold the tank at 55+ all day, reheat to 65. Midday the solar collector gets first go while it is working, unless the tank drops below 45."
+    "solar_wait_min_c": 40,
+    "_note": "Irregular showers: hold the tank at 55+ from 06:00 to 22:00, reheat to 65. 08:00-16:00 the sun does the reheat: always wait until 11:00, after that wait only while the collector is working (cloudy: element). Below 40 the element heats regardless.",
+    "solar_grace_until": "11:00"
   },
   "diverter": {
     "enabled": true,

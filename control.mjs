@@ -62,13 +62,16 @@ export function decide({ minute, schedule, tank, soc, switchOn, blocks, collecto
       const t = Number(K.target_c);
       const latched = switchOn === true && blocks[quarter(minute)] >= t && tank < t - 2;
       let wanted = latched || tank < Number(K.min_c);
+      // Solar first: inside the window, leave the reheat to the sun. Until solar_grace_until the collector is still
+      // warming up, so wait regardless; after that, wait only while it is actually working (else it's cloudy: heat).
       const sw = K.solar_first;
       const solarWorking = pump === "On" || (collector != null && collector > tank + 5);
-      if (wanted && sw && solarWorking && tank >= Number(K.solar_wait_min_c ?? 0)) {
+      if (wanted && sw && tank >= Number(K.solar_wait_min_c ?? 0)) {
         const [sa, sb] = sw.map(toMin);
-        if (minute >= sa && minute < sb && !latched) {
+        const grace = K.solar_grace_until ? toMin(K.solar_grace_until) : sa;
+        if (minute >= sa && minute < sb && (minute < grace || solarWorking)) {
           wanted = false;
-          reasons.push(`keep warm: tank ${tank}°C, solar collector working, letting it heat first`);
+          reasons.push(`keep warm: tank ${tank}°C, leaving the reheat to the sun` + (solarWorking ? " (collector working)" : ` (until ${K.solar_grace_until})`));
         }
       }
       if (wanted) {
