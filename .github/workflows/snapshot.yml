@@ -36,6 +36,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TANNIE_NOTIFY_URL: https://tannie-production.up.railway.app/notify
           TANNIE_NOTIFY_TOKEN: ${{ secrets.TANNIE_NOTIFY_TOKEN }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: node logger.mjs snapshot
       - name: Commit
         if: always()

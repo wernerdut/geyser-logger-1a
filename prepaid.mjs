@@ -103,3 +103,41 @@ export function prepaidAlerts({ local, balance, rate, ledger, estimated = false 
   }
   return out;
 }
+
+/**
+ * Readings captured from WhatsApp arrive without the inverter's import total. Fill it from the logged sample nearest
+ * in time (within 60 min). Readings that can't be resolved yet are dropped for this run (the previous anchor is used).
+ * @param {object} ledger
+ * @param {Array<{local:string, grid_import_total_kwh:number}>} rows  samples, any order
+ */
+export function resolveReadings(ledger, rows) {
+  const toMs = (local) => Date.parse(String(local).replace(" ", "T") + "+02:00");
+  const usable = rows.filter((r) => r && r.grid_import_total_kwh != null && r.local).map((r) => ({ t: toMs(r.local), v: r.grid_import_total_kwh }));
+  const readings = (ledger.readings ?? []).flatMap((rd) => {
+    if (rd.import_total_kwh != null) return [rd];
+    const t = toMs(rd.local);
+    let best = null;
+    for (const u of usable) if (Math.abs(u.t - t) <= 60 * 60000 && (!best || Math.abs(u.t - t) < Math.abs(best.t - t))) best = u;
+    return best ? [{ ...rd, import_total_kwh: best.v, resolved_from_sample: true }] : [];
+  });
+  return { ...ledger, readings };
+}
+
+/**
+ * Grid outage: the inverter sees no grid frequency. If the meter is (nearly) empty, it's more likely the prepaid units
+ * ran out than a municipal outage.
+ */
+export function gridAlerts({ row, balance, batteryKwh = 11.3 }) {
+  if (row.grid_hz == null || row.grid_hz >= 40) return [];
+  const soc = row.batt_soc, load = row.load_w;
+  const stored = soc != null ? (soc / 100) * batteryKwh : null;
+  const hours = stored != null && load > 50 ? stored / (load / 1000) : null;
+  const lines = [
+    `At ${row.local.slice(11, 16)} the inverter sees no grid at 1A Welgemeend (frequency ${row.grid_hz} Hz). The house is on battery.`,
+    `Battery ${soc ?? "?"}%${stored != null ? ` (~${stored.toFixed(1)} kWh)` : ""}, load ${load ?? "?"} W` +
+      (hours != null ? `: roughly ${hours.toFixed(1)} h to empty at this load, and the inverter cuts out before empty.` : "."),
+  ];
+  if (balance != null && balance < 5) lines.push(`The prepaid tracker puts the meter at ~${Math.max(0, Math.round(balance))} kWh, so the units have probably run out. Buy and key in a token.`);
+  else lines.push("Prepaid units look fine, so this is likely a municipal outage or a tripped breaker.");
+  return [{ key: "grid", title: "[power] Grid down at 1A Welgemeend", body: lines.join("\n\n") }];
+}

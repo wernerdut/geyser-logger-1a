@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
-import { balanceOf, dailyRate, prepaidAlerts } from "./prepaid.mjs";
+import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts } from "./prepaid.mjs";
 
 const env = process.env;
 const TZ = "Africa/Johannesburg";
@@ -183,6 +183,7 @@ async function readSunsynk() {
   return {
     pv_w: num(input.pac), pv_today_kwh: num(input.etoday),
     load_w: num(load.totalPower), grid_w: num(grid.pac), grid_import_total_kwh: num(grid.etotalFrom),
+    grid_hz: num(grid.fac), grid_status: grid.status ?? null,
     batt_soc: num(battery.soc), batt_w: num(battery.power),
   };
 }
@@ -226,11 +227,18 @@ async function snapshot() {
   if (g.status === "fulfilled") {
     try { row.control = await control(now, row); } catch (e) { row.control = { error: String(e?.message || e) }; }
   }
+  // Power alerts (prepaid + grid) only when the inverter was read; null leaves open [power] issues alone.
   let power = null;
-  if (row.grid_import_total_kwh != null) {
-    try { power = await prepaid(now, row); } catch (e) { row.prepaid = { error: String(e?.message || e) }; }
+  if (s.status === "fulfilled") {
+    power = [];
+    if (row.grid_import_total_kwh != null) {
+      try { power.push(...((await prepaid(now, row)) ?? [])); } catch (e) { row.prepaid = { error: String(e?.message || e) }; }
+    }
+    power.push(...gridAlerts({ row, balance: row.prepaid?.balance_kwh ?? null }));
   }
   try { await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
+  try { await ledgerUpdateMessage(row); } catch (e) { console.error("ledger message failed:", e?.message || e); }
+  await heartbeat(row, errors);
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
   console.log(
     `${row.local} tank=${row.tank_c ?? "-"} coll=${row.collector_c ?? "-"} pump=${row.pump ?? "-"} elem=${row.element ?? "-"} ` +
@@ -282,7 +290,15 @@ async function control(now, row) {
 
 // ---------- prepaid electricity ----------
 async function prepaid(now, row) {
-  const ledger = JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "prepaid.json"), "utf8"));
+  const raw = JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "prepaid.json"), "utf8"));
+  const rows = [row];
+  for (const d of [localDate(now), localDate(new Date(now.getTime() - 24 * 3600 * 1000))]) {
+    try {
+      const txt = await fs.readFile(path.join(DATA_DIR, `samples/${d}.jsonl`), "utf8");
+      for (const l of txt.split("\n")) if (l.trim()) { try { rows.push(JSON.parse(l)); } catch { /* skip */ } }
+    } catch { /* no file yet */ }
+  }
+  const ledger = resolveReadings(raw, rows);
   const bal = balanceOf(ledger, row.grid_import_total_kwh);
   if (!bal) return null;
   const today = localDate(now);
@@ -342,8 +358,34 @@ async function alerts(now, row, power) {
         method: "PATCH", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ state: "closed" }),
       });
       console.log(`closed cleared alert #${i.number}`);
+      if (i.title === "[power] Grid down at 1A Welgemeend") {
+        const mins = Math.round((Date.parse(row.ts) - Date.parse(i.created_at)) / 60000);
+        await notifyTannie(`*Grid back at 1A Welgemeend* (${row.local.slice(11, 16)}, down ~${mins} min or less). Battery ${row.batt_soc ?? "?"}%.`);
+      }
     }
   }
+}
+
+// After Tannie commits a token or reading ("ledger: ..." commit), tell Werner the new balance.
+async function ledgerUpdateMessage(row) {
+  const msg = env.HEAD_COMMIT_MESSAGE || "";
+  if (env.GITHUB_EVENT_NAME !== "push" || !msg.startsWith("ledger:") || !row.prepaid || row.prepaid.error) return;
+  const p = row.prepaid;
+  await notifyTannie(`*Ledger updated* (${msg.split("\n")[0].slice(7).trim()})\n\nMeter now ~${Math.round(p.balance_kwh)} kWh` +
+    (p.days_left != null ? `, about ${p.days_left} days at ~${Math.round(p.rate_kwh_day)} kWh/day.` : "."));
+}
+
+// Tannie watches for these; two hours of silence means the logger (and every alert) has stopped.
+async function heartbeat(row, errors) {
+  const url = (env.TANNIE_NOTIFY_URL || "").trim().replace(/\/notify$/, "/heartbeat"), tok = (env.TANNIE_NOTIFY_TOKEN || "").trim();
+  if (!url || !tok || url === (env.TANNIE_NOTIFY_URL || "").trim()) return;
+  try {
+    const r = await fetchJson(url, {
+      method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "geyser-logger-1a", local: row.local, errors: errors.length }),
+    });
+    console.log(`heartbeat: ${r.status}`);
+  } catch (e) { console.error("heartbeat failed:", e?.message || e); }
 }
 
 // Optional WhatsApp via Tannie. No-op until TANNIE_NOTIFY_URL and TANNIE_NOTIFY_TOKEN secrets exist.

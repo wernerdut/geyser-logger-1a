@@ -42,3 +42,14 @@ Each snapshot logs `prepaid: {balance_kwh, rate_kwh_day, days_left}` (rate = ave
 - **Tracker missing a token**: computed balance well below zero while the power is on.
 
 Alerts are also sent to Werner on WhatsApp via Tannie (`POST /notify`) once the `TANNIE_NOTIFY_TOKEN` secret exists (same value as `NOTIFY_TOKEN` on the Railway tannie service).
+
+### Grid, heartbeat and WhatsApp capture
+
+- **Grid down**: the inverter reads no grid frequency. `[power] Grid down at 1A Welgemeend` with battery %, load and rough
+  hours left; says "units probably ran out" if the prepaid balance is near zero. When the grid returns the issue closes and
+  a "Grid back" WhatsApp follows. (30-minute resolution: short outages between runs are not seen.)
+- **Heartbeat**: every snapshot POSTs `/heartbeat` to Tannie. Tannie WhatsApps Werner if none arrives for 2 hours, and
+  again when they resume. This is what catches the logger itself dying.
+- **Capture**: Werner forwards the token SMS, a screenshot of the purchase, or "meter 52" to Tannie. Tannie commits it to
+  `prepaid.json` (commit message `ledger: ...`). That push triggers a run, which WhatsApps the new balance. Readings
+  arrive without an inverter import total; the logger takes it from the nearest sample (within 60 minutes).
