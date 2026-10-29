@@ -285,11 +285,23 @@ async function control(now, row) {
     await sleep(2500); // the Geyserwise can drop settings sent back-to-back
   }
   if (out.writes.length) {
-    try {
-      const after = await readGeyser();
-      out.after = { switch: after.power, blocks: after.blocks };
-      out.confirmed = after.power === desired.switch && after.blocks.every((v, i) => v === desired.blocks[i]);
-    } catch (e) { out.after_error = String(e?.message || e); }
+    // Read back; the Geyserwise sometimes drops one of several settings sent close together, so re-send what
+    // didn't stick once before giving up until the next run.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await sleep(attempt === 1 ? 0 : 4000);
+        const after = await readGeyser();
+        out.after = { switch: after.power, blocks: after.blocks };
+        out.confirmed = after.power === desired.switch && after.blocks.every((v, i) => v === desired.blocks[i]);
+        if (out.confirmed || attempt === 2) break;
+        const missed = diff(desired, { switchOn: after.power, blocks: after.blocks });
+        out.retried = missed;
+        for (const w of missed) {
+          try { await writeProp(w.code, w.value); } catch (e) { out.retry_error = String(e?.message || e); }
+          await sleep(2500);
+        }
+      } catch (e) { out.after_error = String(e?.message || e); break; }
+    }
   }
   return out;
 }
