@@ -35,7 +35,7 @@ jobs:
         run: |
           git config user.name "geyser-logger"
           git config user.email "geyser-logger@users.noreply.github.com"
-          git add archive || true
+          git add archive daily.jsonl || true
           git diff --cached --quiet && exit 0
           git commit -m "archive $(date -u +%Y-%m-%d)"
           for i in 1 2 3; do git pull --rebase --quiet && git push --quiet && break; sleep 5; done

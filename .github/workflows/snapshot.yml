@@ -10,6 +10,7 @@ on:
       - control.mjs
       - schedule.json
       - prepaid.mjs
+      - state.mjs
       - prepaid.json
       - .github/workflows/**
 permissions:
@@ -43,7 +44,7 @@ jobs:
         run: |
           git config user.name "geyser-logger"
           git config user.email "geyser-logger@users.noreply.github.com"
-          git add samples || true
+          git add samples state || true
           git diff --cached --quiet && exit 0
           git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
           for i in 1 2 3; do git pull --rebase --quiet && git push --quiet && break; sleep 5; done

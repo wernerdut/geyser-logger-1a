@@ -3,7 +3,11 @@
 Read-only logger for the solar geyser (Geyserwise Max1, via Tuya Cloud) and the Sunsynk inverter at 1A Welgemeend. It never changes anything on either device.
 
 - **snapshot** (every 30 min): tank, collector, pump, element, blocks, PV, load, grid, battery → `samples/YYYY-MM-DD.jsonl`
-- **archive** (daily, 02:23 Cape Town): the previous day's full tank-temperature log from Tuya and the Sunsynk 5-minute curves → `archive/YYYY-MM-DD.json`
+- **archive** (daily, 02:23 Cape Town): the previous day's full tank-temperature log from Tuya and the Sunsynk 5-minute curves → `archive/YYYY-MM-DD.json`, plus that day's summary line in `daily.jsonl`
+- **state/latest.json** (every snapshot): current geyser, inverter, prepaid and open-alert picture, read by Zephyr's Dash. Unread fields are null.
+- **daily.jsonl**: one line per day (grid import, PV, load, battery min, tank min/max, element/pump minutes, prepaid at day end), derived from samples, archive and the import counter only. `node logger.mjs backfill` rebuilds every past day; reruns replace a date's line, never duplicate it.
+
+Tests: `npm test` (pure modules: prepaid.mjs, state.mjs, daily.mjs).
 
 ## Secrets (Settings → Secrets and variables → Actions)
 

@@ -1,7 +1,8 @@
 // 1A Welgemeend geyser + solar logger (read-only). Runs in GitHub Actions.
 //
 //   node logger.mjs snapshot   -> appends one reading to samples/YYYY-MM-DD.jsonl
-//   node logger.mjs archive    -> saves yesterday's full-resolution history to archive/YYYY-MM-DD.json
+//   node logger.mjs archive    -> saves yesterday's full-resolution history to archive/YYYY-MM-DD.json and its daily.jsonl line
+//   node logger.mjs backfill   -> daily.jsonl lines for every past day in samples/ and archive/ (idempotent)
 //
 // It never changes anything on the geyser or the inverter.
 // Credentials come from environment variables (GitHub repository secrets).
@@ -10,7 +11,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
-import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts } from "./prepaid.mjs";
+import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts, monthBlock, estDaysLeft } from "./prepaid.mjs";
+import { latestState, localToIso, lastTokenAt, alertTitle } from "./state.mjs";
+import { dailyRow, upsertDaily } from "./daily.mjs";
 
 const env = process.env;
 const TZ = "Africa/Johannesburg";
@@ -236,10 +239,12 @@ async function snapshot() {
     }
     power.push(...gridAlerts({ row, balance: row.prepaid?.balance_kwh ?? null }));
   }
-  try { await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
+  let alertsOpen = [];
+  try { alertsOpen = await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
   try { await ledgerUpdateMessage(row); } catch (e) { console.error("ledger message failed:", e?.message || e); }
   await heartbeat(row, errors);
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
+  await writeJson("state/latest.json", latestState({ row, prepaid: prepaidState, alertsOpen }));
   console.log(
     `${row.local} tank=${row.tank_c ?? "-"} coll=${row.collector_c ?? "-"} pump=${row.pump ?? "-"} elem=${row.element ?? "-"} ` +
     `pv=${row.pv_w ?? "-"} load=${row.load_w ?? "-"} grid=${row.grid_w ?? "-"} soc=${row.batt_soc ?? "-"}` +
@@ -290,8 +295,16 @@ async function control(now, row) {
 }
 
 // ---------- prepaid electricity ----------
+let prepaidState = null; // what state/latest.json shows under "prepaid"; null when the prepaid check didn't run
+
 async function prepaid(now, row) {
   const raw = JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "prepaid.json"), "utf8"));
+  const block = monthBlock(raw, localDate(now).slice(0, 7));
+  const lastReading = [...(raw.readings ?? [])].map((r) => String(r.local)).sort().at(-1);
+  prepaidState = {
+    month_to_date_kwh: Math.round(block.boughtKwh * 10) / 10, block1_remaining_kwh: Math.round(block.block1Left * 10) / 10,
+    last_reading_at: localToIso(lastReading), last_token_at: lastTokenAt(raw),
+  };
   const rows = [row];
   for (const d of [localDate(now), localDate(new Date(now.getTime() - 24 * 3600 * 1000))]) {
     try {
@@ -312,6 +325,8 @@ async function prepaid(now, row) {
   }
   const rate = dailyRate(daily, today, 7);
   const local = `${today} ${localTime(now)}`;
+  prepaidState.balance_kwh = bal.balance;
+  prepaidState.est_days_left = estDaysLeft(bal.balance, daily, today);
   row.prepaid = {
     balance_kwh: bal.balance, rate_kwh_day: rate, days_left: rate ? Math.round((bal.balance / rate) * 10) / 10 : null,
     estimated: bal.estimated,
@@ -321,6 +336,7 @@ async function prepaid(now, row) {
 
 // ---------- alerts: GitHub issues on this repo (GitHub emails the owner), mirrored to Tannie when configured ----------
 // `power` is the list of prepaid alerts, or null when the prepaid check didn't run (then open [power] issues are left alone).
+// Returns the alerts still open after this run, [{key, title, since}] (the open issues, or this run's alerts without a token).
 async function alerts(now, row, power) {
   const schedule = await loadSchedule();
   let recentRows = [];
@@ -333,16 +349,18 @@ async function alerts(now, row, power) {
   const token = env.GITHUB_TOKEN, repo = env.GITHUB_REPOSITORY;
   if (!token || !repo) {
     if (found.length) console.log("alerts (not posted, no GitHub token):", found.map((a) => a.title).join(" | "));
-    return;
+    return found.map((a) => ({ key: a.key, title: alertTitle(a.title), since: null }));
   }
   const h = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
   const open = (await fetchJson(`https://api.github.com/repos/${repo}/issues?state=open&per_page=100`, { headers: h })).json;
   const openList = Array.isArray(open) ? open.filter((i) => !i.pull_request) : [];
+  const stillOpen = new Map(openList.filter((i) => /^\[(power|geyser alert)\]/.test(i.title)).map((i) => [i.title, i.created_at]));
   for (const a of found) {
     if (openList.some((i) => i.title === a.title)) continue; // already open: don't spam
     const r = await fetchJson(`https://api.github.com/repos/${repo}/issues`, {
       method: "POST", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ title: a.title, body: a.body }),
     });
+    if (r.json?.number) stillOpen.set(a.title, r.json.created_at ?? row.ts);
     console.log(`alert ${a.key}: issue ${r.json?.number ?? r.status}`);
     const link = r.json?.html_url ? `\n\n${r.json.html_url}` : "";
     await notifyTannie(`*${a.title.replace(/^\[[^\]]+\]\s*/, "")}*\n\n${a.body}${link}`);
@@ -359,12 +377,18 @@ async function alerts(now, row, power) {
         method: "PATCH", headers: { ...h, "Content-Type": "application/json" }, body: JSON.stringify({ state: "closed" }),
       });
       console.log(`closed cleared alert #${i.number}`);
+      stillOpen.delete(i.title);
       if (i.title === "[power] Grid down at 1A Welgemeend") {
         const mins = Math.round((Date.parse(row.ts) - Date.parse(i.created_at)) / 60000);
         await notifyTannie(`*Grid back at 1A Welgemeend* (${row.local.slice(11, 16)}, down ~${mins} min or less). Battery ${row.batt_soc ?? "?"}%.`);
       }
     }
   }
+  const keyOf = new Map(found.map((a) => [a.title, a.key]));
+  return [...stillOpen].map(([title, since]) => ({
+    key: keyOf.get(title) ?? alertTitle(title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+    title: alertTitle(title), since,
+  }));
 }
 
 // After Tannie commits a token or reading ("ledger: ..." commit), tell Werner the new balance.
@@ -396,7 +420,7 @@ async function notifyTannie(text) {
   try {
     const r = await fetchJson(url, {
       method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ text, source: "geyser-logger-1a" }),
+      body: JSON.stringify({ text, source: "house" }),
     });
     console.log(`tannie notify: ${r.status}`);
   } catch (e) { console.error("tannie notify failed:", e?.message || e); }
@@ -414,12 +438,41 @@ async function archive() {
   if (s.status === "fulfilled") out.sunsynk_5min = s.value; else errors.push(`sunsynk: ${s.reason?.message || s.reason}`);
   if (errors.length) out.errors = errors;
   await writeJson(`archive/${target}.json`, out);
+  await updateDaily(target);
   console.log(`archive ${target}: tank readings=${out.tank_temp_log?.length ?? 0}, sunsynk series=${Object.keys(out.sunsynk_5min ?? {}).length}` +
     (errors.length ? ` ERRORS: ${errors.join(" | ")}` : ""));
   if (errors.length === 2) process.exitCode = 1;
 }
 
+// ---------- daily.jsonl ----------
+async function readSamples(date) {
+  try {
+    const txt = await fs.readFile(path.join(DATA_DIR, `samples/${date}.jsonl`), "utf8");
+    return txt.split("\n").flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } });
+  } catch { return []; }
+}
+
+async function updateDaily(date) {
+  const next = new Date(Date.parse(`${date}T12:00:00Z`) + 24 * 3600 * 1000).toISOString().slice(0, 10);
+  let arch = null;
+  try { arch = JSON.parse(await fs.readFile(path.join(DATA_DIR, `archive/${date}.json`), "utf8")); } catch { /* none */ }
+  const row = dailyRow(date, await readSamples(date), await readSamples(next), arch);
+  const p = path.join(DATA_DIR, "daily.jsonl");
+  let text = "";
+  try { text = await fs.readFile(p, "utf8"); } catch { /* first line */ }
+  await fs.writeFile(p, upsertDaily(text, row));
+  console.log(`daily ${date}: ${JSON.stringify(row)}`);
+}
+
+async function backfill() {
+  const today = localDate(new Date());
+  const names = async (dir) => { try { return await fs.readdir(path.join(DATA_DIR, dir)); } catch { return []; } };
+  const dates = new Set([...(await names("samples")), ...(await names("archive"))].map((f) => f.slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today));
+  for (const d of [...dates].sort()) await updateDaily(d);
+}
+
 const mode = process.argv[2];
 if (mode === "snapshot") await snapshot();
 else if (mode === "archive") await archive();
-else { console.error("usage: node logger.mjs snapshot|archive"); process.exitCode = 2; }
+else if (mode === "backfill") await backfill();
+else { console.error("usage: node logger.mjs snapshot|archive|backfill"); process.exitCode = 2; }

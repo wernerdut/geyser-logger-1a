@@ -28,6 +28,22 @@ export function dailyRate(daily, today, n = 7) {
   return r2(done.reduce((s, d) => s + d.kwh, 0) / done.length);
 }
 
+/** kWh bought (tokens) in a calendar month "YYYY-MM" and how much of that month's block 1 is still unbought. */
+export function monthBlock(ledger, month) {
+  const b1 = ledger.tariff?.block1_kwh ?? 600;
+  const boughtKwh = (ledger.tokens ?? []).filter((t) => ymd(t.local ?? t.date).slice(0, 7) === month).reduce((s, t) => s + Number(t.kwh), 0);
+  return { boughtKwh, block1Left: Math.max(0, b1 - boughtKwh) };
+}
+
+/** Days the balance lasts at the trailing 7-day average import; null with under 3 complete days of data. */
+export function estDaysLeft(balance, daily, today) {
+  if (balance == null) return null;
+  const done = daily.filter((d) => d.date < today && Number.isFinite(d.kwh)).slice(-7);
+  if (done.length < 3) return null;
+  const rate = done.reduce((s, d) => s + d.kwh, 0) / done.length;
+  return rate > 0 ? Math.round((balance / rate) * 10) / 10 : null;
+}
+
 /**
  * @param {object} p
  * @param {string} p.local   "YYYY-MM-DD HH:MM:SS" Cape Town time
@@ -42,7 +58,7 @@ export function prepaidAlerts({ local, balance, rate, ledger, estimated = false 
   const T = ledger.tariff ?? {};
   const A = ledger.alerts ?? {};
   const lowDays = A.low_days ?? 3, buffer = A.buffer_days ?? 2;
-  const b1 = T.block1_kwh ?? 600, p1 = T.block1_r_per_kwh ?? 3.5595, p2 = T.block2_r_per_kwh ?? 4.6906;
+  const p1 = T.block1_r_per_kwh ?? 3.5595, p2 = T.block2_r_per_kwh ?? 4.6906;
 
   const month = local.slice(0, 7);
   const [y, m, d] = local.slice(0, 10).split("-").map(Number);
@@ -50,8 +66,7 @@ export function prepaidAlerts({ local, balance, rate, ledger, estimated = false 
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const daysToFirst = daysInMonth - d + 1 - hour / 24; // until 00:00 on the 1st
   const monthName = new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
-  const boughtKwh = (ledger.tokens ?? []).filter((t) => ymd(t.local ?? t.date).slice(0, 7) === month).reduce((s, t) => s + Number(t.kwh), 0);
-  const block1Left = Math.max(0, b1 - boughtKwh);
+  const { boughtKwh, block1Left } = monthBlock(ledger, month);
   const daysLeft = balance / rate;
   const runsOut = (days) => (days < 1 ? `in about ${Math.max(0, Math.round(days * 24))} hours` : `in about ${days.toFixed(1)} days`);
   const status = `Meter ~${Math.max(0, Math.round(balance))} kWh${estimated ? " (estimated)" : ""}, using ~${Math.round(rate)} kWh/day, runs out ${runsOut(daysLeft)}.`;
