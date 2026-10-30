@@ -6,8 +6,32 @@ const r2 = (x) => Math.round(x * 100) / 100;
 const ymd = (s) => String(s).slice(0, 10);
 
 /** Most recent meter reading (the anchor) and every token keyed in after it. */
-export function balanceOf(ledger, importTotalNow) {
-  const readings = [...(ledger.readings ?? [])].sort((a, b) => String(a.local).localeCompare(String(b.local)));
+/**
+ * The meter can register a few % more than the inverter's grid-import counter (wiring before the CT, rounding).
+ * Learn the ratio from the last two real readings: meter units used between them / inverter import between them.
+ * Needs readings with import totals (resolve first) and at least 15 kWh between them; clamped to 0.9-1.2.
+ */
+export function meterFactor(ledger) {
+  const real = (ledger.readings ?? []).filter((r) => !r.estimated && r.import_total_kwh != null)
+    .sort((a, b) => String(a.local).localeCompare(String(b.local)));
+  if (real.length < 2) return 1;
+  const [a, b] = real.slice(-2);
+  const between = (ledger.tokens ?? []).filter((t) => {
+    const tl = String(t.local ?? t.date);
+    const after = tl.length > 10 ? tl > String(a.local) : ymd(tl) > ymd(a.local);
+    const before = tl.length > 10 ? tl <= String(b.local) : ymd(tl) <= ymd(b.local);
+    return after && before;
+  }).reduce((s, t) => s + Number(t.kwh), 0);
+  const meterUsed = Number(a.units) + between - Number(b.units);
+  const inverterUsed = Number(b.import_total_kwh) - Number(a.import_total_kwh);
+  if (!(inverterUsed >= 15) || !(meterUsed > 0)) return 1;
+  return Math.round(Math.min(1.2, Math.max(0.9, meterUsed / inverterUsed)) * 1000) / 1000;
+}
+
+export function balanceOf(ledger, importTotalNow, factor = 1) {
+  // Only readings with an inverter total can anchor (unresolved ones are skipped, never NaN).
+  const readings = (ledger.readings ?? []).filter((r) => r.import_total_kwh != null)
+    .sort((a, b) => String(a.local).localeCompare(String(b.local)));
   const anchor = readings.at(-1);
   if (!anchor || importTotalNow == null) return null;
   // A token counts if it was bought after the reading. Same-day tokens need a time to compare, else they are
@@ -17,8 +41,8 @@ export function balanceOf(ledger, importTotalNow) {
     return tl.length > 10 ? tl > String(anchor.local) : ymd(tl) > ymd(anchor.local);
   });
   const added = after.reduce((s, t) => s + Number(t.kwh), 0);
-  const used = importTotalNow - Number(anchor.import_total_kwh);
-  return { balance: r2(Number(anchor.units) + added - used), anchor, added: r2(added), used: r2(used), estimated: !!anchor.estimated };
+  const used = (importTotalNow - Number(anchor.import_total_kwh)) * factor;
+  return { balance: r2(Number(anchor.units) + added - used), anchor, added: r2(added), used: r2(used), estimated: !!anchor.estimated, factor };
 }
 
 /** Average grid import per day over the last `n` complete days. `daily` is [{date, kwh}] in date order. */

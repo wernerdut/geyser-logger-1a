@@ -333,7 +333,7 @@ async function prepaid(now, row) {
     } catch { /* no file yet */ }
   }
   const ledger = resolveReadings(raw, rows);
-  const bal = balanceOf(ledger, row.grid_import_total_kwh);
+  const bal = balanceOf(ledger, row.grid_import_total_kwh, meterFactor(ledger));
   if (!bal) return null;
   const today = localDate(now);
   const ym = today.slice(0, 7);
@@ -343,13 +343,14 @@ async function prepaid(now, row) {
     const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
     daily = [...(await sunsynkMonthImport(prev)), ...daily];
   }
-  const rate = dailyRate(daily, today, 7);
+  const rawRate = dailyRate(daily, today, 7);
+  const rate = rawRate == null ? null : Math.round(rawRate * bal.factor * 100) / 100;
   const local = `${today} ${localTime(now)}`;
   prepaidState.balance_kwh = bal.balance;
   prepaidState.est_days_left = estDaysLeft(bal.balance, daily, today);
   row.prepaid = {
     balance_kwh: bal.balance, rate_kwh_day: rate, days_left: rate ? Math.round((bal.balance / rate) * 10) / 10 : null,
-    estimated: bal.estimated,
+    estimated: bal.estimated, meter_factor: bal.factor,
   };
   return prepaidAlerts({ local, balance: bal.balance, rate, ledger, estimated: bal.estimated });
 }
