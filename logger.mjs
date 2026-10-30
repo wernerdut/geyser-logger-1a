@@ -318,7 +318,15 @@ async function prepaid(now, row) {
     last_reading_at: localToIso(lastReading), last_token_at: lastTokenAt(raw),
   };
   const rows = [row];
-  for (const d of [localDate(now), localDate(new Date(now.getTime() - 24 * 3600 * 1000))]) {
+  // Load the sample files for the day of every reading that still needs an import total (plus the day either side),
+  // not just today/yesterday: a reading older than a day must keep resolving, or the anchor silently falls back.
+  const days = new Set();
+  for (const rd of raw.readings ?? []) {
+    if (rd.import_total_kwh != null) continue;
+    const t = Date.parse(String(rd.local).replace(" ", "T") + "+02:00");
+    for (const off of [-1, 0, 1]) days.add(localDate(new Date(t + off * 24 * 3600 * 1000)));
+  }
+  for (const d of days) {
     try {
       const txt = await fs.readFile(path.join(DATA_DIR, `samples/${d}.jsonl`), "utf8");
       for (const l of txt.split("\n")) if (l.trim()) { try { rows.push(JSON.parse(l)); } catch { /* skip */ } }
