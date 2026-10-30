@@ -104,16 +104,21 @@ export function prepaidAlerts({ local, balance, rate, ledger, estimated = false 
     return out;
   }
 
-  // 1. Cheap units are still available this month and the meter won't last to the 1st (plus a margin): buy now.
+  // 1. Buy this month's block-1 units. Werner wants this every month on the 1st at ~10:00 (monthly_reminder_hour),
+  //    whatever the balance. On later days it fires only if nothing was bought yet and the meter won't last to the
+  //    next 1st (plus a margin). Never before 10:00 on the 1st: the critical rule covers a meter running out overnight.
   //    Buying early costs nothing (credit doesn't expire) and waiting risks a second, block-2 token later.
-  if (block1Left >= 50 && daysLeft < daysToFirst + lowDays) {
+  const reminderHour = A.monthly_reminder_hour ?? 10;
+  const firstDayReminder = d === 1 && hour >= reminderHour;
+  const needEarly = d > 1 && daysLeft < daysToFirst + lowDays;
+  if (block1Left >= 50 && (firstDayReminder || needEarly)) {
     const kwh = Math.round(block1Left);
     out.push({
       key: `month-${month}`,
       title: `[power] ${monthName}: buy this month's block-1 electricity`,
       body: `${status}\n\nYou've bought ${Math.round(boughtKwh)} kWh this month, so ${kwh} kWh is still at the block-1 rate. ` +
         `Buy about R${Math.round(kwh * p1).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} now (≈${kwh} kWh at R${p1.toFixed(2)}). ` +
-        `Anything beyond that this month costs R${p2.toFixed(2)}/kWh.`,
+        `Anything beyond that this month costs R${p2.toFixed(2)}/kWh.\n\nForward the token SMS to Tannie once it's bought.`,
     });
   }
 

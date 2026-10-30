@@ -9,7 +9,8 @@
   },
   "alerts": {
     "low_days": 3,
-    "buffer_days": 2
+    "buffer_days": 2,
+    "monthly_reminder_hour": 10
   },
   "tokens": [
     {
