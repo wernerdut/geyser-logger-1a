@@ -11,7 +11,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
-import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts, monthBlock, estDaysLeft } from "./prepaid.mjs";
+import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts, monthBlock, estDaysLeft, meterFactor } from "./prepaid.mjs";
 import { latestState, localToIso, lastTokenAt, alertTitle } from "./state.mjs";
 import { dailyRow, upsertDaily } from "./daily.mjs";
 
@@ -235,9 +235,10 @@ async function snapshot() {
   if (s.status === "fulfilled") {
     power = [];
     if (row.grid_import_total_kwh != null) {
-      try { power.push(...((await prepaid(now, row)) ?? [])); } catch (e) { row.prepaid = { error: String(e?.message || e) }; }
+      try { power.push(...((await prepaid(now, row)) ?? [])); }
+      catch (e) { row.prepaid = { error: String(e?.message || e) }; power = null; } // don't close prepaid alerts on our own error
     }
-    power.push(...gridAlerts({ row, balance: row.prepaid?.balance_kwh ?? null }));
+    if (power) power.push(...gridAlerts({ row, balance: row.prepaid?.balance_kwh ?? null }));
   }
   let alertsOpen = [];
   try { alertsOpen = await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
