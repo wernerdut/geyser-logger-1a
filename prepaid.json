@@ -39,6 +39,13 @@
       "kwh": 21.4,
       "source": "whatsapp",
       "local": "2026-10-30 05:41:18"
+    },
+    {
+      "date": "2026-11-01",
+      "rand": 2150.0,
+      "kwh": 603.1,
+      "source": "whatsapp",
+      "local": "2026-11-01 10:27:37"
     }
   ],
   "readings": [
