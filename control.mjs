@@ -60,7 +60,10 @@ export function decide({ minute, schedule, tank, soc, switchOn, blocks, collecto
     const [a, b] = K.window.map(toMin);
     if (minute >= a && minute < b) {
       const t = Number(K.target_c);
-      const latched = switchOn === true && blocks[quarter(minute)] >= t && tank < t - 2;
+      // Release once the sensor is back above min_c + 5 (default 60). Waiting for ~target meant the element kept
+      // cycling 58-65 for hours (seen 3-5 Nov, 17:00-20:30 from the battery), because the sensor rarely reads 63+.
+      const release = Number(K.release_c ?? Number(K.min_c) + 5);
+      const latched = switchOn === true && blocks[quarter(minute)] >= t && tank < release;
       let wanted = latched || tank < Number(K.min_c);
       // Solar first: inside the window, leave the reheat to the sun. Until solar_grace_until the collector is still
       // warming up, so wait regardless; after that, wait only while it is actually working (else it's cloudy: heat).
