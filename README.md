@@ -66,3 +66,16 @@ always waits (the collector is still warming up), after that only while the coll
 5°C above the tank); a cloudy day falls back to the element. Below 40 the element heats regardless.
 The fixed evening "hot by 19:00" was removed; the morning one stays because nights are idle. The surplus diverter
 (battery full, 10:00-16:30) still tops the tank up to 65 for free. 65 is the ceiling without a mixing valve.
+
+### WhatsApp reports (reports.mjs)
+
+- **Weekly**, Sunday from 18:00: grid kWh and rand vs the week before, solar, hot-water draws and days the tank fell
+  under 45°C, meter balance and run-out date, alerts, read errors. Covers the 7 complete days ending Saturday.
+- **Monthly**, the 1st from 10:00 (after the buy reminder): the previous calendar month, incl. tokens bought and R/kWh.
+- **"Doesn't look right"**, checked once a day from 07:00:
+  - usage spike: yesterday's grid > 2× the two-week median (and ≥ 8 kWh), with the likely cause
+    (hot-water draws, night grid, little sun) or "no obvious cause";
+  - cold morning: the morning heat ran but the tank read < 55°C at 06:30;
+  - battery not filling: ≥ 18 kWh solar but the battery peaked < 90%, unless the geyser heated for 1.5 h+ in the
+    solar window (that's the sun going into hot water, not a fault).
+- What was sent is recorded in the sample row (`notices`); earlier rows of the day prevent duplicates.

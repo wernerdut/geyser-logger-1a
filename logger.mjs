@@ -14,6 +14,7 @@ import { decide, diff, checkAlerts, ALLOWED_CODES } from "./control.mjs";
 import { balanceOf, dailyRate, prepaidAlerts, resolveReadings, gridAlerts, monthBlock, estDaysLeft, meterFactor } from "./prepaid.mjs";
 import { latestState, localToIso, lastTokenAt, alertTitle } from "./state.mjs";
 import { dailyRow, upsertDaily } from "./daily.mjs";
+import { dayStats, weeklyText, monthlyText, anomalies, addDays } from "./reports.mjs";
 
 const env = process.env;
 const TZ = "Africa/Johannesburg";
@@ -243,6 +244,7 @@ async function snapshot() {
   let alertsOpen = [];
   try { alertsOpen = await alerts(now, row, power); } catch (e) { console.error("alerts failed:", e?.message || e); }
   try { await ledgerUpdateMessage(row); } catch (e) { console.error("ledger message failed:", e?.message || e); }
+  try { await reports(now, row); } catch (e) { console.error("reports failed:", e?.message || e); }
   await heartbeat(row, errors);
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
   await writeJson("state/latest.json", latestState({ row, prepaid: prepaidState, alertsOpen }));
@@ -464,6 +466,44 @@ async function archive() {
   console.log(`archive ${target}: tank readings=${out.tank_temp_log?.length ?? 0}, sunsynk series=${Object.keys(out.sunsynk_5min ?? {}).length}` +
     (errors.length ? ` ERRORS: ${errors.join(" | ")}` : ""));
   if (errors.length === 2) process.exitCode = 1;
+}
+
+// ---------- WhatsApp reports: weekly (Sun 18:00), monthly (1st 10:00), daily "doesn't look right" check ----------
+// What has gone out is recorded in row.notices; today's earlier rows are the memory, so nothing is sent twice.
+async function reports(now, row) {
+  const today = localDate(now), hhmm = localTime(now).slice(0, 5);
+  const sent = new Set((await readSamples(today)).flatMap((r) => r.notices ?? []));
+  const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const due = [];
+  if (dow === 0 && hhmm >= "18:00" && !sent.has("weekly")) due.push("weekly");
+  if (today.endsWith("-01") && hhmm >= "10:00" && !sent.has("monthly")) due.push("monthly");
+  const check = hhmm >= "07:00" && !sent.has("anomaly-check");
+  if (!due.length && !check) return;
+
+  let daily = [];
+  try {
+    daily = (await fs.readFile(path.join(DATA_DIR, "daily.jsonl"), "utf8")).split("\n")
+      .flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } });
+  } catch { /* none yet */ }
+  const back = due.includes("monthly") ? 64 : 16;
+  const statsByDate = {};
+  for (let i = 0; i <= back; i++) {
+    const d = addDays(today, -i);
+    const rows = await readSamples(d);
+    if (d === today) rows.push(row);
+    if (rows.length) statsByDate[d] = dayStats(rows);
+  }
+  const factor = row.prepaid?.meter_factor ?? 1;
+  const ledger = JSON.parse(await fs.readFile(path.join(env.SCHEDULE_DIR || ".", "prepaid.json"), "utf8"));
+  const notices = [];
+  const send = async (key, text) => { await notifyTannie(text); notices.push(key); console.log(`notice ${key}`); };
+  if (due.includes("monthly")) await send("monthly", monthlyText({ today, daily, statsByDate, prepaid: row.prepaid, ledger, factor }));
+  if (due.includes("weekly")) await send("weekly", weeklyText({ today, daily, statsByDate, prepaid: row.prepaid, tariff: ledger.tariff, factor }));
+  if (check) {
+    for (const a of anomalies({ today, daily, statsByDate, factor })) if (!sent.has(a.key)) await send(a.key, a.text);
+    notices.push("anomaly-check");
+  }
+  if (notices.length) row.notices = notices;
 }
 
 // ---------- daily.jsonl ----------
