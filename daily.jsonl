@@ -23,3 +23,4 @@
 {"date":"2026-11-13","grid_import_kwh":13.4,"pv_kwh":20.8,"load_kwh":30.2,"battery_min_pct":25,"tank_min_c":42,"tank_max_c":67,"element_on_min":69,"pump_on_min":30,"prepaid_end_kwh":477.18}
 {"date":"2026-11-14","grid_import_kwh":9,"pv_kwh":18.5,"load_kwh":23.1,"battery_min_pct":25,"tank_min_c":42,"tank_max_c":67,"element_on_min":60,"pump_on_min":90,"prepaid_end_kwh":467.44}
 {"date":"2026-11-15","grid_import_kwh":7.7,"pv_kwh":16.4,"load_kwh":18.3,"battery_min_pct":25,"tank_min_c":48,"tank_max_c":68,"element_on_min":30,"pump_on_min":90,"prepaid_end_kwh":459.29}
+{"date":"2026-11-16","grid_import_kwh":9.8,"pv_kwh":21,"load_kwh":28.5,"battery_min_pct":25,"tank_min_c":41,"tank_max_c":68,"element_on_min":82,"pump_on_min":88,"prepaid_end_kwh":449.01}
