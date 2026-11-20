@@ -33,6 +33,8 @@ export function dayStats(samples) {
   const t = (r) => r.local.slice(11, 16);
   const dayTanks = fin(rows.filter((r) => t(r) >= "06:00" && t(r) <= "22:00").map((r) => r.tank_c));
   const at630 = rows.find((r) => t(r) >= "06:30" && t(r) < "07:30" && Number.isFinite(r.tank_c));
+  // Hottest reading 05:00-06:30: if the tank got hot and then dropped, someone showered; that's use, not a fault.
+  const preDawn = fin(rows.filter((r) => t(r) >= "05:00" && t(r) < "06:30").map((r) => r.tank_c));
   const heatRan = rows.some((r) => t(r) >= "01:30" && t(r) < "06:30" && r.power === true && (r.blocks ?? []).some((b) => b >= 60));
   // Runs in the solar window with the controller heating (switch on, a block at 60+): geyser using the day's sun.
   const sunHeatRuns = rows.filter((r) => t(r) >= "09:00" && t(r) < "16:00" && r.power === true && (r.blocks ?? []).some((b) => b >= 60)).length;
@@ -42,6 +44,7 @@ export function dayStats(samples) {
     draws,
     tank_day_min: dayTanks.length ? Math.min(...dayTanks) : null,
     tank_0630: at630 ? at630.tank_c : null,
+    tank_morning_peak: preDawn.length ? Math.max(...preDawn) : null,
     morning_heat_ran: heatRan,
     battery_max: fin(rows.map((r) => r.batt_soc)).length ? Math.max(...fin(rows.map((r) => r.batt_soc))) : null,
     night_grid_kwh: nightGrid == null ? null : r1(nightGrid),
@@ -163,8 +166,9 @@ export function anomalies({ today, daily, statsByDate, factor = 1 }) {
     });
   }
 
-  // 2. Cold morning: the morning heat ran, but the tank was under 55°C at 06:30.
-  if (ts && ts.morning_heat_ran && ts.tank_0630 != null && ts.tank_0630 < 55) {
+  // 2. Cold morning: the morning heat ran, but the tank was under 55°C at 06:30 and never got there from 05:00 either
+  //    (a tank that was hot at 06:00 and colder at 06:30 just means an early shower).
+  if (ts && ts.morning_heat_ran && ts.tank_0630 != null && ts.tank_0630 < 55 && !(ts.tank_morning_peak >= 55)) {
     out.push({
       key: `cold-${today}`,
       text: `*Geyser cold this morning*\n\nThe tank read ${ts.tank_0630}°C at 06:30 even though the morning heat ran. ` +

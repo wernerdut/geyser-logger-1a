@@ -56,3 +56,18 @@ test("anomalies: spike with cause, cold morning, battery not filling, and quiet 
   qs["2026-11-16"] = { morning_heat_ran: true, tank_0630: 60 };
   assert.deepEqual(anomalies({ today: "2026-11-16", daily: quiet, statsByDate: qs }), []);
 });
+
+test("cold morning: an early shower after the tank got hot is not a fault (20 Nov)", () => {
+  const s = dayStats([
+    row("2026-11-20 02:54:00", { tank_c: 49, power: true, blocks: [65, 30, 30, 30] }),
+    row("2026-11-20 05:00:00", { tank_c: 59, power: true, blocks: [65, 30, 30, 30] }),
+    row("2026-11-20 06:00:00", { tank_c: 60 }),
+    row("2026-11-20 06:30:00", { tank_c: 50 }),
+  ]);
+  assert.equal(s.tank_morning_peak, 60);
+  const quiet = mkDaily("2026-11-06", 14, () => ({ grid_import_kwh: 7, pv_kwh: 20 }));
+  const sb = Object.fromEntries(quiet.map((d) => [d.date, { draws: 2, night_grid_kwh: 1, battery_max: 100 }]));
+  assert.deepEqual(anomalies({ today: "2026-11-20", daily: quiet, statsByDate: { ...sb, "2026-11-20": s } }), []);
+  const cold = { ...s, tank_morning_peak: 50 };
+  assert.deepEqual(anomalies({ today: "2026-11-20", daily: quiet, statsByDate: { ...sb, "2026-11-20": cold } }).map((x) => x.key), ["cold-2026-11-20"]);
+});
