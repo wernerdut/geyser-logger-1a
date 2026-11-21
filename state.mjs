@@ -19,10 +19,10 @@ export const alertTitle = (title) => String(title).replace(/^\[[^\]]+\]\s*/, "")
  * @param {object|null} p.prepaid  {balance_kwh, est_days_left, month_to_date_kwh, block1_remaining_kwh, last_reading_at, last_token_at} or null
  * @param {Array<{key,title,since}>} p.alertsOpen
  */
-export function latestState({ row, prepaid, alertsOpen }) {
+export function latestState({ row, prepaid, alertsOpen, previous = null, maxStaleMin = 180 }) {
   const on = (v) => (v == null ? null : v === "On");
   const p = prepaid ?? {};
-  return {
+  const fresh = {
     ts: row.ts,
     geyser: {
       tank_c: n(row.tank_c), collector_c: n(row.collector_c),
@@ -39,6 +39,20 @@ export function latestState({ row, prepaid, alertsOpen }) {
     },
     alerts_open: alertsOpen ?? [],
   };
+  // A section this run couldn't read (Sunsynk or Tuya cloud error) keeps the previous run's values for up to
+  // maxStaleMin, so Dash doesn't blank for one bad run. Each section says when its values are from (as_of).
+  const nowMs = Date.parse(row.ts);
+  for (const k of ["geyser", "inverter", "prepaid"]) {
+    const read = Object.values(fresh[k]).some((v) => v != null);
+    const prev = previous?.[k];
+    const prevAt = prev?.as_of ?? (prev ? previous.ts : null);
+    const prevOk = prev && prevAt && Object.entries(prev).some(([key, v]) => key !== "as_of" && v != null) &&
+      nowMs - Date.parse(prevAt) <= maxStaleMin * 60000;
+    if (read) fresh[k].as_of = row.ts;
+    else if (prevOk) fresh[k] = { ...prev, as_of: prevAt };
+    else fresh[k].as_of = null;
+  }
+  return fresh;
 }
 
 /** Latest token's date/time in the ledger, ISO. */

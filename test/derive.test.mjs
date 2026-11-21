@@ -27,12 +27,33 @@ test("latestState: full shape, nulls not omissions", () => {
   const s = latestState({ row: { ts: "2026-10-29T01:43:25Z", tank_c: 63, element: "On", pump: "Off", power: true, grid_hz: 49.8 }, prepaid: null, alertsOpen: [] });
   assert.deepEqual(s, {
     ts: "2026-10-29T01:43:25Z",
-    geyser: { tank_c: 63, collector_c: null, element_on: true, pump_on: false, switch_on: true },
-    inverter: { pv_w: null, load_w: null, grid_w: null, battery_pct: null, grid_up: true },
-    prepaid: { balance_kwh: null, est_days_left: null, month_to_date_kwh: null, block1_remaining_kwh: null, last_reading_at: null, last_token_at: null },
+    geyser: { tank_c: 63, collector_c: null, element_on: true, pump_on: false, switch_on: true, as_of: "2026-10-29T01:43:25Z" },
+    inverter: { pv_w: null, load_w: null, grid_w: null, battery_pct: null, grid_up: true, as_of: "2026-10-29T01:43:25Z" },
+    prepaid: { balance_kwh: null, est_days_left: null, month_to_date_kwh: null, block1_remaining_kwh: null, last_reading_at: null, last_token_at: null, as_of: null },
     alerts_open: [],
   });
   assert.equal(latestState({ row: { ts: "x", grid_hz: 0 } }).inverter.grid_up, false);
+});
+
+test("latestState: a section that failed this run keeps the last good values for up to 3 h", () => {
+  const good = latestState({ row: { ts: "2026-11-21T10:30:00Z", tank_c: 60, pv_w: 2530, batt_soc: 94, grid_hz: 50 },
+    prepaid: { balance_kwh: 390 }, alertsOpen: [] });
+  const bad = latestState({ row: { ts: "2026-11-21T11:00:00Z", tank_c: 61 }, prepaid: null, alertsOpen: [], previous: good });
+  assert.equal(bad.geyser.tank_c, 61);
+  assert.equal(bad.geyser.as_of, "2026-11-21T11:00:00Z");
+  assert.equal(bad.inverter.battery_pct, 94);
+  assert.equal(bad.inverter.as_of, "2026-11-21T10:30:00Z");
+  assert.equal(bad.prepaid.balance_kwh, 390);
+  // a second failure still points at the original reading; past 3 h it goes null
+  const bad2 = latestState({ row: { ts: "2026-11-21T11:30:00Z", tank_c: 61 }, prepaid: null, alertsOpen: [], previous: bad });
+  assert.equal(bad2.inverter.as_of, "2026-11-21T10:30:00Z");
+  const late = latestState({ row: { ts: "2026-11-21T14:00:00Z", tank_c: 61 }, prepaid: null, alertsOpen: [], previous: bad2 });
+  assert.equal(late.inverter.battery_pct, null);
+  assert.equal(late.inverter.as_of, null);
+  // old-format previous (no as_of) uses its ts
+  const legacy = latestState({ row: { ts: "2026-11-21T11:00:00Z" }, prepaid: null, alertsOpen: [],
+    previous: { ts: "2026-11-21T10:30:00Z", inverter: { battery_pct: 94 } } });
+  assert.equal(legacy.inverter.battery_pct, 94);
 });
 
 test("state helpers", () => {

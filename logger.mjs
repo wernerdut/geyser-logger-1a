@@ -247,7 +247,9 @@ async function snapshot() {
   try { await reports(now, row); } catch (e) { console.error("reports failed:", e?.message || e); }
   await heartbeat(row, errors);
   await appendLine(`samples/${localDate(now)}.jsonl`, JSON.stringify(row));
-  await writeJson("state/latest.json", latestState({ row, prepaid: prepaidState, alertsOpen }));
+  let previous = null;
+  try { previous = JSON.parse(await fs.readFile(path.join(DATA_DIR, "state/latest.json"), "utf8")); } catch { /* first run */ }
+  await writeJson("state/latest.json", latestState({ row, prepaid: prepaidState, alertsOpen, previous }));
   console.log(
     `${row.local} tank=${row.tank_c ?? "-"} coll=${row.collector_c ?? "-"} pump=${row.pump ?? "-"} elem=${row.element ?? "-"} ` +
     `pv=${row.pv_w ?? "-"} load=${row.load_w ?? "-"} grid=${row.grid_w ?? "-"} soc=${row.batt_soc ?? "-"}` +
